@@ -1,0 +1,7 @@
+<resources>
+    <color name="qb_bg">#09090B</color>
+    <color name="qb_surface">#141418</color>
+    <color name="qb_text">#F6F6F7</color>
+    <color name="qb_accent">#FF6A13</color>
+    <color name="qb_black">#09090B</color>
+</resources>
