@@ -5,6 +5,11 @@ import java.time.LocalDate;
 public final class Models {
     private Models() {}
 
+    /** Direzione di un debito extra-Family: l'altra persona deve dare dei soldi a me. */
+    public static final String DEBT_THEY_OWE = "THEY";
+    /** Direzione di un debito extra-Family: sono io a dover dare dei soldi all'altra persona. */
+    public static final String DEBT_I_OWE = "ME";
+
     public static final class Person {
         public long id;
         public String name;
@@ -71,6 +76,33 @@ public final class Models {
         public long nextChargeCents;
         public long nextChargeAlreadyCoveredCents;
         public long nextChargeRemainingCents;
+    }
+
+    /** Debito o credito generico verso una persona, indipendente dalle Family. */
+    public static final class Debt {
+        public long id;
+        public long personId;
+        public long amountCents;
+        /** DEBT_THEY_OWE oppure DEBT_I_OWE. */
+        public String direction;
+        public LocalDate happenedOn;
+        public String note;
+        public boolean settled;
+        public LocalDate settledOn;
+        public String personName;
+        public boolean theyOwe() { return DEBT_THEY_OWE.equals(direction); }
+        /** Importo con segno: positivo se la persona deve a me, negativo se io devo a lei. */
+        public long signedCents() { return theyOwe() ? amountCents : -amountCents; }
+    }
+
+    /** Saldo aggregato dei debiti aperti con una singola persona. */
+    public static final class DebtBalance {
+        public Person person;
+        public long theyOweCents;
+        public long iOweCents;
+        public int openCount;
+        /** Positivo se la persona è in debito con me, negativo se sono io in debito con lei. */
+        public long netCents() { return theyOweCents - iOweCents; }
     }
 
     public static final class SubscriptionSummary {

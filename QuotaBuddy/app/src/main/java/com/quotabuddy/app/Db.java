@@ -19,7 +19,7 @@ import java.util.Map;
 
 public class Db extends SQLiteOpenHelper {
     private static final String DB_NAME = "quotabuddy.db";
-    private static final int DB_VERSION = 4;
+    private static final int DB_VERSION = 5;
 
     public Db(Context c) { super(c, DB_NAME, null, DB_VERSION); }
 
@@ -85,6 +85,24 @@ public class Db extends SQLiteOpenHelper {
                 "cycle_date TEXT NOT NULL," +
                 "FOREIGN KEY(membership_id) REFERENCES memberships(id) ON DELETE CASCADE)");
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_exemptions_unique ON membership_exemptions(membership_id,cycle_date)");
+        createDebts(db);
+    }
+
+    /** Debiti/crediti generici verso una persona, senza alcun legame con le Family. */
+    private void createDebts(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS debts(" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "person_id INTEGER NOT NULL," +
+                "amount_cents INTEGER NOT NULL," +
+                "direction TEXT NOT NULL," +
+                "happened_on TEXT NOT NULL," +
+                "note TEXT," +
+                "settled INTEGER NOT NULL DEFAULT 0," +
+                "settled_on TEXT," +
+                "created_at TEXT NOT NULL," +
+                "FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE CASCADE)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_debts_person ON debts(person_id)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(happened_on)");
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
@@ -101,6 +119,7 @@ public class Db extends SQLiteOpenHelper {
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_exemptions_unique ON membership_exemptions(membership_id,cycle_date)");
             }
         }
+        if (oldVersion < 5) createDebts(db);
     }
 
     private void migrateV1(SQLiteDatabase db) {
@@ -296,14 +315,44 @@ public class Db extends SQLiteOpenHelper {
     public long totalPaid(long subId,long personId){Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE subscription_id=? AND person_id=? AND pending=0",new String[]{String.valueOf(subId),String.valueOf(personId)});long x=0;if(c.moveToFirst())x=c.getLong(0);c.close();return x;}
     public long receivedBetween(LocalDate from,LocalDate to){Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE paid_at>=? AND paid_at<=? AND pending=0",new String[]{from.toString(),to.toString()});long x=0;if(c.moveToFirst())x=c.getLong(0);c.close();return x;}
 
+    // ---- Debiti/crediti generici (fuori dalle Family) ----
+
+    public long addDebt(long personId,long amountCents,String direction,LocalDate happenedOn,String note,boolean settled){ContentValues v=new ContentValues();v.put("person_id",personId);v.put("amount_cents",amountCents);v.put("direction",direction);v.put("happened_on",happenedOn.toString());v.put("note",note);v.put("settled",settled?1:0);if(settled)v.put("settled_on",LocalDate.now().toString());else v.putNull("settled_on");v.put("created_at",now());return getWritableDatabase().insert("debts",null,v);}
+    public void updateDebt(long id,long personId,long amountCents,String direction,LocalDate happenedOn,String note,boolean settled){ContentValues v=new ContentValues();v.put("person_id",personId);v.put("amount_cents",amountCents);v.put("direction",direction);v.put("happened_on",happenedOn.toString());v.put("note",note);v.put("settled",settled?1:0);if(settled)v.put("settled_on",LocalDate.now().toString());else v.putNull("settled_on");getWritableDatabase().update("debts",v,"id=?",new String[]{String.valueOf(id)});}
+    public void setDebtSettled(long id,boolean settled){ContentValues v=new ContentValues();v.put("settled",settled?1:0);if(settled)v.put("settled_on",LocalDate.now().toString());else v.putNull("settled_on");getWritableDatabase().update("debts",v,"id=?",new String[]{String.valueOf(id)});}
+    public void deleteDebt(long id){getWritableDatabase().delete("debts","id=?",new String[]{String.valueOf(id)});}
+    public Models.Debt debt(long id){Cursor c=getReadableDatabase().rawQuery(debtSelect()+" WHERE d.id=?",new String[]{String.valueOf(id)});Models.Debt d=null;if(c.moveToFirst())d=readDebt(c);c.close();return d;}
+    public List<Models.Debt> debts(boolean includeSettled){ArrayList<Models.Debt> out=new ArrayList<>();Cursor c=getReadableDatabase().rawQuery(debtSelect()+(includeSettled?"":" WHERE d.settled=0")+" ORDER BY d.settled,d.happened_on DESC,d.id DESC",null);while(c.moveToNext())out.add(readDebt(c));c.close();return out;}
+    public List<Models.Debt> debtsForPerson(long personId,boolean includeSettled){ArrayList<Models.Debt> out=new ArrayList<>();Cursor c=getReadableDatabase().rawQuery(debtSelect()+" WHERE d.person_id=?"+(includeSettled?"":" AND d.settled=0")+" ORDER BY d.settled,d.happened_on DESC,d.id DESC",new String[]{String.valueOf(personId)});while(c.moveToNext())out.add(readDebt(c));c.close();return out;}
+    private String debtSelect(){return "SELECT d.id,d.person_id,d.amount_cents,d.direction,d.happened_on,d.note,d.settled,d.settled_on,pe.name FROM debts d JOIN people pe ON pe.id=d.person_id";}
+    private Models.Debt readDebt(Cursor c){Models.Debt d=new Models.Debt();d.id=c.getLong(0);d.personId=c.getLong(1);d.amountCents=c.getLong(2);d.direction=c.getString(3);d.happenedOn=LocalDate.parse(c.getString(4));d.note=c.getString(5);d.settled=c.getInt(6)==1;String s=c.getString(7);d.settledOn=s==null||s.isEmpty()?null:LocalDate.parse(s);d.personName=c.getString(8);return d;}
+
+    /** Somma dei debiti ancora aperti nella direzione indicata. */
+    public long debtTotalOpen(String direction){Cursor c=getReadableDatabase().rawQuery("SELECT COALESCE(SUM(amount_cents),0) FROM debts WHERE settled=0 AND direction=?",new String[]{direction});long x=0;if(c.moveToFirst())x=c.getLong(0);c.close();return x;}
+
+    /** Saldo dei debiti aperti raggruppato per persona, ordinato per nome. Include solo chi ha almeno una voce aperta. */
+    public List<Models.DebtBalance> debtBalances(){
+        Map<Long,Models.DebtBalance> map=new LinkedHashMap<>();
+        for(Models.Debt d:debts(false)){
+            Models.DebtBalance b=map.get(d.personId);
+            if(b==null){b=new Models.DebtBalance();b.person=person(d.personId);if(b.person==null)continue;map.put(d.personId,b);}
+            if(d.theyOwe())b.theyOweCents+=d.amountCents;else b.iOweCents+=d.amountCents;
+            b.openCount++;
+        }
+        ArrayList<Models.DebtBalance> out=new ArrayList<>(map.values());
+        out.sort((a,b)->a.person.name.compareToIgnoreCase(b.person.name));
+        return out;
+    }
+
     public JSONObject exportJson() throws Exception {
-        JSONObject root=new JSONObject();root.put("format","QuotaBuddy");root.put("version",2);root.put("exportedAt",now());
+        JSONObject root=new JSONObject();root.put("format","QuotaBuddy");root.put("version",3);root.put("exportedAt",now());
         SQLiteDatabase db=getReadableDatabase();
         root.put("people",tableToJson(db,"SELECT id,name,method,note,created_at FROM people ORDER BY id",new String[]{"id","name","method","note","created_at"}));
         root.put("subscriptions",tableToJson(db,"SELECT id,name,start_date,renewal_day,include_owner,archived,color,created_at FROM subscriptions ORDER BY id",new String[]{"id","name","start_date","renewal_day","include_owner","archived","color","created_at"}));
         root.put("prices",tableToJson(db,"SELECT id,subscription_id,amount_cents,valid_from FROM subscription_prices ORDER BY id",new String[]{"id","subscription_id","amount_cents","valid_from"}));
         root.put("memberships",tableToJson(db,"SELECT id,subscription_id,person_id,joined_on,left_on,note FROM memberships ORDER BY id",new String[]{"id","subscription_id","person_id","joined_on","left_on","note"}));
         root.put("payments",tableToJson(db,"SELECT id,subscription_id,person_id,amount_cents,paid_at,method,note,created_at FROM payments ORDER BY id",new String[]{"id","subscription_id","person_id","amount_cents","paid_at","method","note","created_at"}));
+        root.put("debts",tableToJson(db,"SELECT id,person_id,amount_cents,direction,happened_on,note,settled,settled_on,created_at FROM debts ORDER BY id",new String[]{"id","person_id","amount_cents","direction","happened_on","note","settled","settled_on","created_at"}));
         return root;
     }
 
@@ -312,7 +361,7 @@ public class Db extends SQLiteOpenHelper {
     public void importJson(JSONObject root) throws Exception {
         if(!"QuotaBuddy".equals(root.optString("format"))||root.optInt("version",0)<2)throw new IllegalArgumentException("Formato non supportato");
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
-        try{clearAll(db);insertJsonRows(db,"people",root.getJSONArray("people"));insertJsonRows(db,"subscriptions",root.getJSONArray("subscriptions"));insertJsonRows(db,"subscription_prices",root.getJSONArray("prices"));insertJsonRows(db,"memberships",root.getJSONArray("memberships"));insertJsonRows(db,"payments",root.getJSONArray("payments"));db.setTransactionSuccessful();}finally{db.endTransaction();}
+        try{clearAll(db);insertJsonRows(db,"people",root.getJSONArray("people"));insertJsonRows(db,"subscriptions",root.getJSONArray("subscriptions"));insertJsonRows(db,"subscription_prices",root.getJSONArray("prices"));insertJsonRows(db,"memberships",root.getJSONArray("memberships"));insertJsonRows(db,"payments",root.getJSONArray("payments"));JSONArray d=root.optJSONArray("debts");if(d!=null)insertJsonRows(db,"debts",d);db.setTransactionSuccessful();}finally{db.endTransaction();}
     }
 
     private void insertJsonRows(SQLiteDatabase db,String table,JSONArray rows)throws Exception{for(int i=0;i<rows.length();i++){JSONObject o=rows.getJSONObject(i);ContentValues v=new ContentValues();JSONArray names=o.names();if(names==null)continue;for(int j=0;j<names.length();j++){String k=names.getString(j);if(o.isNull(k))v.putNull(k);else{Object x=o.get(k);if(x instanceof Number)v.put(k,((Number)x).longValue());else v.put(k,String.valueOf(x));}}db.insertOrThrow(table,null,v);}}
@@ -329,5 +378,5 @@ public class Db extends SQLiteOpenHelper {
     }
 
     private static String unesc(String s){return s.replace("%7C","|").replace("%25","%");}
-    private void clearAll(SQLiteDatabase db){db.delete("payments",null,null);db.delete("memberships",null,null);db.delete("subscription_prices",null,null);db.delete("subscriptions",null,null);db.delete("people",null,null);}
+    private void clearAll(SQLiteDatabase db){db.delete("debts",null,null);db.delete("payments",null,null);db.delete("memberships",null,null);db.delete("subscription_prices",null,null);db.delete("subscriptions",null,null);db.delete("people",null,null);}
 }

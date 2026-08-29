@@ -198,6 +198,7 @@ public class MainActivity extends Activity {
         nav.addView(navItem(R.drawable.ic_nav_family,"Family","families",this::showFamilies),new LinearLayout.LayoutParams(0,-1,1));
         nav.addView(navItem(R.drawable.ic_nav_person,"Persone","people",this::showPeople),new LinearLayout.LayoutParams(0,-1,1));
         nav.addView(navItem(R.drawable.ic_nav_payments,"Pagamenti","payments",this::showPayments),new LinearLayout.LayoutParams(0,-1,1));
+        nav.addView(navItem(R.drawable.ic_nav_debts,"Debiti","debts",this::showDebts),new LinearLayout.LayoutParams(0,-1,1));
         nav.addView(navItem(R.drawable.ic_nav_settings,"Altro","settings",this::showSettings),new LinearLayout.LayoutParams(0,-1,1));
         return nav;
     }
@@ -206,7 +207,7 @@ public class MainActivity extends Activity {
         LinearLayout box=vbox();box.setGravity(Gravity.CENTER);boolean on=key.equals(currentTab);
         ImageView i=new ImageView(this);Drawable d=getDrawable(iconRes);if(d!=null){d=d.mutate();d.setTint(on?ACCENT:MUTED);}i.setImageDrawable(d);
         box.addView(i,new LinearLayout.LayoutParams(dp(22),dp(22)));
-        addGap(box,4);TextView l=tv(label,10,on?TEXT:MUTED,on);l.setGravity(Gravity.CENTER);box.addView(l);box.setOnClickListener(v->click.run());return box;
+        addGap(box,4);TextView l=tv(label,9.5f,on?TEXT:MUTED,on);l.setGravity(Gravity.CENTER);l.setMaxLines(1);l.setEllipsize(android.text.TextUtils.TruncateAt.END);box.addView(l);box.setOnClickListener(v->click.run());return box;
     }
 
     private void showHome(){
@@ -287,7 +288,7 @@ public class MainActivity extends Activity {
     private void showPeople(){
         currentTab="people";screen("Persone","Una sola anagrafica, anche su più Family",false,null,"+",()->personDialog(null),true);List<Models.Person> people=db.people();if(people.isEmpty()){content.addView(emptyText("Nessuna persona.","Aggiungi un amico e poi collegalo a una o più Family."));return;}for(Models.Person p:people){LinearLayout c=card();c.setOnClickListener(v->showPerson(p.id));LinearLayout h=hbox();h.addView(avatar(p.name),new LinearLayout.LayoutParams(dp(46),dp(46)));LinearLayout tx=vbox();tx.setPadding(dp(12),0,0,0);tx.addView(tv(p.name,17,TEXT,true));addGap(tx,4);List<Models.Membership> ms=db.membershipsForPerson(p.id);tx.addView(muted(ms.size()+" Family"+(p.method==null||p.method.isEmpty()?"":" · "+p.method)));h.addView(tx,new LinearLayout.LayoutParams(0,-2,1));h.addView(tv("›",24,MUTED,false));c.addView(h);content.addView(c);addGap(content,9);}}
 
-    private void showPerson(long personId){Models.Person p=db.person(personId);if(p==null){showPeople();return;}screen(p.name,p.method==null||p.method.isEmpty()?"Profilo persona":p.method,true,this::showPeople,"⋮",()->personActions(p),false);List<Models.Membership> ms=db.membershipsForPerson(p.id);long total=0;for(Models.Payment pay:db.payments())if(pay.personId==p.id)total+=pay.amountCents;LinearLayout hero=card();hero.addView(muted("TOTALE VERSATO"));addGap(hero,6);hero.addView(money(eur(total)));if(p.note!=null&&!p.note.trim().isEmpty()){addGap(hero,12);hero.addView(body(p.note));}content.addView(hero);addGap(content,22);sectionTitle("Family",null,null);if(ms.isEmpty())content.addView(emptyText("Nessuna Family collegata.","Puoi aggiungere questa persona dalla schermata di una Family."));for(Models.Membership m:ms){Models.MemberSnapshot snap=ledger.snapshot(m,LocalDate.now());content.addView(memberCard(snap));addGap(content,9);}addGap(content,22);sectionTitle("Pagamenti",null,null);for(Models.Payment pay:db.payments()){if(pay.personId!=p.id)continue;content.addView(paymentCard(pay));addGap(content,8);}}
+    private void showPerson(long personId){Models.Person p=db.person(personId);if(p==null){showPeople();return;}screen(p.name,p.method==null||p.method.isEmpty()?"Profilo persona":p.method,true,this::showPeople,"⋮",()->personActions(p),false);List<Models.Membership> ms=db.membershipsForPerson(p.id);long total=0;for(Models.Payment pay:db.payments())if(pay.personId==p.id)total+=pay.amountCents;LinearLayout hero=card();hero.addView(muted("TOTALE VERSATO"));addGap(hero,6);hero.addView(money(eur(total)));if(p.note!=null&&!p.note.trim().isEmpty()){addGap(hero,12);hero.addView(body(p.note));}content.addView(hero);addGap(content,22);sectionTitle("Family",null,null);if(ms.isEmpty())content.addView(emptyText("Nessuna Family collegata.","Puoi aggiungere questa persona dalla schermata di una Family."));for(Models.Membership m:ms){Models.MemberSnapshot snap=ledger.snapshot(m,LocalDate.now());content.addView(memberCard(snap));addGap(content,9);}List<Models.Debt> openDebts=db.debtsForPerson(p.id,false);if(!openDebts.isEmpty()){long tOwe=0,mOwe=0;for(Models.Debt d:openDebts){if(d.theyOwe())tOwe+=d.amountCents;else mOwe+=d.amountCents;}long net=tOwe-mOwe;addGap(content,22);sectionTitle("Debiti fuori dalle Family","Apri",()->showPersonDebts(p.id));LinearLayout dc=card();dc.setOnClickListener(v->showPersonDebts(p.id));dc.addView(muted(net>0?"TI DEVE":net<0?"GLI DEVI":"SALDO NETTO"));addGap(dc,6);dc.addView(tv(eur(Math.abs(net)),24,net>0?ACCENT:net<0?DANGER:TEXT,true));addGap(dc,5);dc.addView(muted(openDebts.size()+(openDebts.size()==1?" voce aperta":" voci aperte")));content.addView(dc);}addGap(content,22);sectionTitle("Pagamenti",null,null);for(Models.Payment pay:db.payments()){if(pay.personId!=p.id)continue;content.addView(paymentCard(pay));addGap(content,8);}}
     private void personActions(Models.Person p){String[] opts={"Modifica persona","Elimina persona"};new AlertDialog.Builder(this).setTitle(p.name).setItems(opts,(d,w)->{if(w==0)personDialog(p);else confirm("Eliminare "+p.name+"?","Verranno eliminati anche le sue partecipazioni e i pagamenti registrati.",()->{db.deletePerson(p.id);showPeople();});}).show();}
 
     private void showPayments(){currentTab="payments";screen("Pagamenti","Ogni movimento è modificabile o eliminabile",false,null,"+",()->paymentDialog(null,null,null),true);
@@ -309,6 +310,111 @@ public class MainActivity extends Activity {
 
     private void showPendingPayments(){currentTab="payments";screen("Da verificare","Pagamenti trovati nel CSV importato",true,this::showPayments,null,null,false);List<Models.Payment> pending=db.pendingPayments();if(pending.isEmpty()){content.addView(emptyText("Nessun pagamento da verificare.",null));return;}for(Models.Payment p:pending){LinearLayout c=card();LinearLayout h=hbox();TextView av=avatar(p.personName);h.addView(av,new LinearLayout.LayoutParams(dp(42),dp(42)));LinearLayout x=vbox();x.setPadding(dp(12),0,0,0);x.addView(tv(p.personName,16,TEXT,true));addGap(x,3);x.addView(muted(p.subscriptionName+" · "+shortDate(p.paidAt)+(p.note==null?"":" · "+p.note)));h.addView(x,new LinearLayout.LayoutParams(0,-2,1));h.addView(tv("+ "+eur(p.amountCents),16,WARNING,true));c.addView(h);addGap(c,14);LinearLayout btns=hbox();Button ok=button("✓ Conferma",true);ok.setOnClickListener(v->{db.confirmPayment(p.id);showPendingPayments();});Button del=button("Elimina",false);del.setOnClickListener(v->{db.deletePayment(p.id);showPendingPayments();});btns.addView(ok,new LinearLayout.LayoutParams(0,-2,1));addGap(btns,10);btns.addView(del,new LinearLayout.LayoutParams(0,-2,1));c.addView(btns);content.addView(c);addGap(content,10);}}
     private View paymentCard(Models.Payment p){LinearLayout c=card();c.setOnClickListener(v->paymentDialog(p.subscriptionId,p.personId,p));LinearLayout h=hbox();TextView av=avatar(p.personName);h.addView(av,new LinearLayout.LayoutParams(dp(42),dp(42)));LinearLayout x=vbox();x.setPadding(dp(12),0,0,0);x.addView(tv(p.personName,16,TEXT,true));addGap(x,3);String info=p.subscriptionName+" · "+shortDate(p.paidAt)+(p.method==null||p.method.isEmpty()?"":" · "+p.method);x.addView(muted(info));h.addView(x,new LinearLayout.LayoutParams(0,-2,1));h.addView(tv("+ "+eur(p.amountCents),16,familyColor(p.subscriptionColor),true));c.addView(h);if(p.note!=null&&!p.note.trim().isEmpty()){addGap(c,10);c.addView(muted(p.note));}return c;}
+
+    // ---- Debiti e crediti generici, senza alcun legame con le Family ----
+
+    private boolean debtsShowSettled=false;
+
+    private void showDebts(){
+        currentTab="debts";screen("Debiti","Prestiti e favori, fuori dalle Family",false,null,"+",()->debtDialog(null,null),true);
+        long theyOwe=db.debtTotalOpen(Models.DEBT_THEY_OWE),iOwe=db.debtTotalOpen(Models.DEBT_I_OWE);
+        List<Models.DebtBalance> balances=db.debtBalances();
+        int openCount=0;for(Models.DebtBalance b:balances)openCount+=b.openCount;
+        String sub=openCount==0?"Nessuna voce aperta":openCount+(openCount==1?" voce aperta":" voci aperte")+" · "+balances.size()+(balances.size()==1?" persona":" persone");
+        content.addView(debtHero(theyOwe,iOwe,openCount,sub));
+        addGap(content,22);sectionTitle("Per persona",null,null);
+        if(balances.isEmpty())content.addView(emptyText("Nessun debito aperto.","Segna qui i soldi prestati o ricevuti che non c'entrano con gli abbonamenti."));
+        else for(Models.DebtBalance b:balances){content.addView(debtBalanceCard(b));addGap(content,9);}
+        List<Models.Debt> list=db.debts(debtsShowSettled);
+        addGap(content,24);sectionTitle("Movimenti",debtsShowSettled?"Nascondi saldati":"Mostra saldati",()->{debtsShowSettled=!debtsShowSettled;showDebts();});
+        if(list.isEmpty())content.addView(emptyText("Nessun movimento.","Tocca + in alto per aggiungere la prima voce."));
+        else{String last="";for(Models.Debt d:list){String month=monthYear(d.happenedOn);if(!month.equals(last)){content.addView(muted(month.toUpperCase(Locale.ITALY)));addGap(content,7);last=month;}content.addView(debtCard(d,true));addGap(content,8);}}
+    }
+
+    /** Mini dashboard: saldo netto in evidenza + totali per direzione. */
+    private View debtHero(long theyOwe,long iOwe,int openCount,String subline){
+        long net=theyOwe-iOwe;
+        LinearLayout hero=card();hero.setBackground(shape(Color.rgb(17,17,20),24));
+        hero.addView(muted(net>0?"IN TOTALE TI DEVONO":net<0?"IN TOTALE DEVI":"SALDO NETTO"));addGap(hero,7);
+        hero.addView(tv(eur(Math.abs(net)),29,net>0?ACCENT:net<0?DANGER:TEXT,true));
+        addGap(hero,4);hero.addView(muted(subline));
+        addGap(hero,17);LinearLayout m=hbox();
+        m.addView(metric("Ti devono",eur(theyOwe),theyOwe>0?ACCENT:TEXT),new LinearLayout.LayoutParams(0,-2,1));
+        m.addView(metric("Devi",eur(iOwe),iOwe>0?DANGER:TEXT),new LinearLayout.LayoutParams(0,-2,1));
+        m.addView(metric("Voci aperte",String.valueOf(openCount),TEXT),new LinearLayout.LayoutParams(0,-2,1));
+        hero.addView(m);return hero;
+    }
+
+    private View debtBalanceCard(Models.DebtBalance b){
+        long net=b.netCents();LinearLayout c=card();c.setOnClickListener(v->showPersonDebts(b.person.id));
+        LinearLayout h=hbox();h.addView(avatar(b.person.name),new LinearLayout.LayoutParams(dp(44),dp(44)));
+        LinearLayout tx=vbox();tx.setPadding(dp(12),0,0,0);tx.addView(tv(b.person.name,17,TEXT,true));addGap(tx,4);
+        String detail=net>0?"Ti deve":net<0?"Gli devi":"Siete in pari";
+        if(b.theyOweCents>0&&b.iOweCents>0)detail+=" · "+eur(b.theyOweCents)+" − "+eur(b.iOweCents);
+        tx.addView(muted(detail+" · "+b.openCount+(b.openCount==1?" voce":" voci")));
+        h.addView(tx,new LinearLayout.LayoutParams(0,-2,1));
+        h.addView(tv((net>0?"+ ":net<0?"− ":"")+eur(Math.abs(net)),17,net>0?ACCENT:net<0?DANGER:MUTED,true));
+        c.addView(h);return c;
+    }
+
+    private View debtCard(Models.Debt d,boolean withName){
+        LinearLayout c=card();c.setOnClickListener(v->debtDialog(d.personId,d));
+        LinearLayout h=hbox();h.addView(avatar(d.personName),new LinearLayout.LayoutParams(dp(42),dp(42)));
+        LinearLayout tx=vbox();tx.setPadding(dp(12),0,0,0);
+        tx.addView(tv(withName?d.personName:(d.theyOwe()?"Ti deve":"Gli devi"),16,d.settled?MUTED:TEXT,true));addGap(tx,3);
+        String info=(withName?(d.theyOwe()?"Ti deve":"Gli devi")+" · ":"")+shortDate(d.happenedOn);
+        if(d.note!=null&&!d.note.trim().isEmpty())info+=" · "+d.note.trim();
+        tx.addView(muted(info));h.addView(tx,new LinearLayout.LayoutParams(0,-2,1));
+        if(d.settled)h.addView(pill("saldato",MUTED,Color.rgb(42,42,48)));
+        else h.addView(tv((d.theyOwe()?"+ ":"− ")+eur(d.amountCents),16,d.theyOwe()?ACCENT:DANGER,true));
+        c.addView(h);return c;
+    }
+
+    private void showPersonDebts(long personId){
+        Models.Person p=db.person(personId);if(p==null){showDebts();return;}
+        screen(p.name,"Debiti e crediti fuori dalle Family",true,this::showDebts,"+",()->debtDialog(personId,null),false);
+        List<Models.Debt> all=db.debtsForPerson(personId,true);
+        long theyOwe=0,iOwe=0;int open=0;
+        for(Models.Debt d:all){if(d.settled)continue;open++;if(d.theyOwe())theyOwe+=d.amountCents;else iOwe+=d.amountCents;}
+        content.addView(debtHero(theyOwe,iOwe,open,open==0?"Nessuna voce aperta con "+p.name:open+(open==1?" voce aperta":" voci aperte")+" con "+p.name));
+        addGap(content,22);sectionTitle("Movimenti",null,null);
+        if(all.isEmpty()){content.addView(emptyText("Nessun movimento con "+p.name+".","Tocca + in alto per aggiungere la prima voce."));return;}
+        for(Models.Debt d:all){content.addView(debtCard(d,false));addGap(content,8);}
+    }
+
+    private void debtDialog(Long prePerson,Models.Debt existing){
+        List<Models.Person> people=db.people();
+        if(people.isEmpty()){new AlertDialog.Builder(this).setTitle("Prima serve una persona").setMessage("Crea l'anagrafica, poi potrai segnare i debiti con lei.").setPositiveButton("Crea persona",(d,w)->personDialog(null)).setNegativeButton("Annulla",null).show();return;}
+        LinearLayout l=form();
+        Spinner who=spinner();ArrayList<String> names=new ArrayList<>();for(Models.Person p:people)names.add(p.name);
+        who.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names));
+        long targetPerson=existing!=null?existing.personId:(prePerson==null?-1:prePerson);
+        for(int i=0;i<people.size();i++)if(people.get(i).id==targetPerson)who.setSelection(i);
+        Spinner dir=spinner();dir.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Deve darmi dei soldi","Devo dargli dei soldi"}));
+        dir.setSelection(existing!=null&&!existing.theyOwe()?1:0);
+        EditText amount=input("Importo");EditText note=input("Per cosa? (facoltativo)");
+        LocalDate[] date={existing==null?LocalDate.now():existing.happenedOn};
+        Button dateBtn=dateButton("Data",date[0]);dateBtn.setOnClickListener(v->pickDate(date[0],x->{date[0]=x;dateBtn.setText("Data · "+longDate(x));}));
+        CheckBox settled=check("Già saldato",existing!=null&&existing.settled);
+        if(existing!=null){amount.setText(decimal(existing.amountCents));note.setText(existing.note);}
+        l.addView(who);l.addView(dir);l.addView(amount);l.addView(dateBtn);l.addView(note);l.addView(settled);
+        AlertDialog.Builder b=new AlertDialog.Builder(this).setTitle(existing==null?"Nuova voce":"Modifica voce")
+                .setView(l)
+                .setPositiveButton("Salva",(d,w)->{
+                    try{
+                        long cents=parseMoney(amount.getText().toString());if(cents<=0)throw new Exception();
+                        Models.Person p=people.get(who.getSelectedItemPosition());
+                        String direction=dir.getSelectedItemPosition()==0?Models.DEBT_THEY_OWE:Models.DEBT_I_OWE;
+                        String n=note.getText().toString().trim();
+                        if(existing==null)db.addDebt(p.id,cents,direction,date[0],n,settled.isChecked());
+                        else db.updateDebt(existing.id,p.id,cents,direction,date[0],n,settled.isChecked());
+                        showDebts();
+                    }catch(Exception e){toast("Importo non valido");}
+                })
+                .setNegativeButton("Annulla",null);
+        if(existing!=null)b.setNeutralButton("Elimina",(d,w)->confirm("Eliminare la voce?","Il saldo con "+existing.personName+" verrà ricalcolato.",()->{db.deleteDebt(existing.id);showDebts();}));
+        b.show();
+    }
 
     private android.content.SharedPreferences prefs(){return getSharedPreferences("quotabuddy_prefs",MODE_PRIVATE);}
 

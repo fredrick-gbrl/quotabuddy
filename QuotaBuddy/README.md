@@ -13,6 +13,7 @@ QuotaBuddy 2 è un'app Android offline-first per gestire abbonamenti condivisi t
 - Allocazione automatica di ogni pagamento dalla quota più vecchia scoperta verso i mesi futuri
 - Gestione di arretrati, pagamenti parziali e anticipi
 - Dashboard generale e dashboard per Family
+- Sezione Debiti per prestiti e favori che non c'entrano con le Family, con mini dashboard del saldo netto
 - Profili persona con storico
 - Backup/ripristino JSON locale
 - Import dei vecchi backup testuali QuotaBuddy 1
